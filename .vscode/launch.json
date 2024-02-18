@@ -1,0 +1,85 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        // {
+        //     "name": "Capturing",
+        //     "type": "python",
+        //     "request": "launch",
+        //     "cwd": "${workspaceFolder}/src",
+        //     "console": "integratedTerminal", 
+        //     "program": "capturing.py",
+        // },
+
+        {
+            "name": "Pose Estimation",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/src",
+            "console": "integratedTerminal", 
+            "program": "pose_estimate.py",
+        },
+
+        {
+            "name": "Landmark Detection",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/src",
+            "console": "integratedTerminal", 
+            "program": "landmark_detect.py",
+        },
+
+        // {
+        //     "name": "Run Server",
+        //     "type": "python",
+        //     "request": "launch",
+        //     "cwd": "${workspaceFolder}/src",
+        //     "console": "integratedTerminal", 
+        //     "program": "run_server.py",
+        //     "args" : ["--config", "configs/stream.yml", "--checkpoint", "../external/goha/s3/checkpoint825000.ckpt",
+        //          "--savedir", "../renders", "--src_dir", "/home/ubuntu/datasets/goha/tungi_src",
+        //          "--tgt_dir", "/home/ubuntu/datasets/cap", "--tri_dir", "../triplanes", "--frame_limit", "90"
+        //     ],
+        // },
+
+        {
+            "name": "Run Server",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/src",
+            "console": "integratedTerminal", 
+            "program": "run_server_v2.py",
+            "args" : ["--config", "configs/stream.yml",
+                "--checkpoint", "../external/goha/s3/checkpoint825000.ckpt",
+                "--frame_limit", "90"
+            ],
+        },
+
+        {
+
+            "name": "Run Client",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/src",
+            "console": "integratedTerminal", 
+            "program": "run_client.py",
+            "args" : ["--config", "configs/stream.yml",
+                "--checkpoint", "../external/goha/s3/checkpoint825000.ckpt",
+                "--frame_limit", "90"
+            ],
+        }
+
+        // {
+
+        //     "name": "Run Client",
+        //     "type": "python",
+        //     "request": "launch",
+        //     "cwd": "${workspaceFolder}/src",
+        //     "console": "integratedTerminal", 
+        //     "program": "run_client.py",
+        //     "args" : ["--config", "configs/stream.yml", "--checkpoint", "../external/goha/s3/checkpoint825000.ckpt",
+        //          "--savedir", "../renders", "--src_dir", "/home/ubuntu/datasets/goha/tungi_src",
+        //          "--tgt_dir", "/home/ubuntu/datasets/cap", "--tri_dir", "../triplanes", "--frame_limit", "90"
+        //     ],
+        // }
+    ]
+}
