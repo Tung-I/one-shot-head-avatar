@@ -29,7 +29,9 @@ class ExpLoss(nn.Module):
         self.deep3D.eval()
         self.deep3D.facemodel.to(device)
         self.deep3D.net_recon.to(device)
-        #self.deep3D.facemodel.render.to(device)
+        # if test:
+        #     self.deep3D.net_recon.eval()
+        # #self.deep3D.facemodel.render.to(device)
 
         focal = 1015.0
         center = 112.0
@@ -71,6 +73,7 @@ class ExpLoss(nn.Module):
         img = self.preprocess(img)
         pose_img = self.preprocess(pose_img)
         im_tensor = torch.cat((img, pose_img))
+
         with torch.no_grad():
             output_coeff = self.deep3D.net_recon(im_tensor)
 
