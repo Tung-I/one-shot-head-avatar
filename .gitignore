@@ -4,6 +4,7 @@ outputs/*
 triplanes/*
 src/cache/*
 renders/*
+src/export/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
