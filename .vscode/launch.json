@@ -63,7 +63,8 @@
             "program": "run_server_v2.py",
             "args" : ["--config", "configs/stream.yml",
                 "--checkpoint", "../external/goha/s3/checkpoint825000.ckpt",
-                "--frame_limit", "90"
+                "--frame_limit", "90", 
+                "--export"
             ],
         },
 

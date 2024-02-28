@@ -126,25 +126,21 @@ class ServerModel(torch.nn.Module):
         img = torch.cat((id_img, pose_img, tar_img))
         with torch.no_grad():
             output_coeff = self.deep3D.net_recon(img)
+            
         output_coeff[0, 80: 144] = output_coeff[2, 80:144]  # replace expression with target expression
         output_coeff[0, 224: 227] = output_coeff[1, 224: 227]  # replace head pose with target head pose
         output_coeff[0, 254:] = output_coeff[1, 254:]
 
         with torch.no_grad():
             pred_vertex, pred_texture, pred_color, landmark = self.deep3D.facemodel.compute_for_render(output_coeff[0:1])
-            # pred_mask, _, pred_face = self.renderer(pred_vertex, self.deep3D.facemodel.face_buf, feat=pred_color)
             pred_face = self.renderer(pred_vertex, self.deep3D.facemodel.face_buf, pred_color)
         
 
         sudo = pred_face * 2 - 1
         sudo = F.interpolate(sudo, size=self.img_src.shape[-2:], mode='bilinear', align_corners=False)
         sudo = ((sudo + 1) / 2.0 - self.image_mean.detach()) / self.image_std.detach()
-        # return sudo
-        
-        inputs = {}
-        inputs['pixel_values'] = sudo
-        inputs['output_hidden_states'] = True
-        expr_feat = self.expr_net(**inputs).logits
+        expr_feat = self.expr_net(pixel_values=sudo, output_hidden_states=True, return_dict=True).logits
+
         expr_planes = self.embedding2expr(expr_feat)
 
         return expr_planes

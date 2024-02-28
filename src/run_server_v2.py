@@ -17,7 +17,6 @@ from timeit import default_timer as timer
 from utils.cfgnode import CfgNode
 from utils.utils import torch_to_np, load_raw_image, load_parsing_image
 
-# from models.expression_encoder import ExpressionEncoder
 
 SRC_DIR = '/home/ubuntu/datasets/cap/src'
 SRC_FNAME = os.path.join(SRC_DIR, 'source.png')
@@ -104,16 +103,17 @@ class EncodeTester():
         self.model.to(self.device)
         self.model.eval()
 
-        # self.expr_encoder = ExpressionEncoder()
-        # self.expr_encoder.load_model(saved_state_dict)
-        # self.expr_encoder.to(self.device)
-        # self.expr_encoder.eval()
-
         print("===> Loaded checkpoint from {} at iteration {}.".format(checkpoint_path, self.iter_num))
         return
     
-    def test(self, tar_fnames, tar_mask_fnames, save_tri=True):
+    def test(self, tar_fnames, tar_mask_fnames, save_tri=True, export=False):
         device = self.device
+
+        # Load cached features
+        cano_plane_cached = np.load('cache/cano.npy')
+        app_plane_cached = np.load('cache/app.npy')
+        cano_plane_cached = torch.tensor(cano_plane_cached).to(self.device)
+        app_plane_cached = torch.tensor(app_plane_cached).to(self.device)
 
         for i in tqdm(range(self.frame_limit)):
             # Target image masking
@@ -128,21 +128,24 @@ class EncodeTester():
             #     traced_model = torch.jit.trace(self.model, tar_img_masked)
             #     torch.jit.save(traced_model, trace_output_path)
             #     break
+            if not export:
+                start = timer()
+                with torch.no_grad():
+                    expr_planes = self.model(tar_img_masked)  # 38 ms if reuse app-plane
+                end = timer()
+                print("Time taken to lift a frame: {}".format(end - start))  
 
-            start = timer()
-            with torch.no_grad():
-                tri_planes = self.model(tar_img_masked)  # 38 ms if reuse app-plane
-                # sudo = self.model(tar_img_masked)  # 38 ms if reuse app-plane
-                # tri_planes = self.expr_encoder(sudo)
-            end = timer()
-            print("Time taken to lift a frame: {}".format(end - start))  
+                tri_planes = cano_plane_cached + expr_planes + app_plane_cached
         
-            # Save tri-plane and drive frame
-            if save_tri:
-                tri_planes = tri_planes.detach().cpu().numpy()
-                np.save(os.path.join(self.tri_dir, '{0:04d}_tri.npy'.format(i)), tri_planes)
-                drive_frame = torch_to_np(tar_img_masked)
-                cv2.imwrite(os.path.join(self.tri_dir, '{0:04d}_drive.png'.format(i)), drive_frame)
+                # Save tri-plane and drive frame
+                if save_tri:
+                    tri_planes = tri_planes.detach().cpu().numpy()
+                    np.save(os.path.join(self.tri_dir, '{0:04d}_tri.npy'.format(i)), tri_planes)
+                    drive_frame = torch_to_np(tar_img_masked)
+                    cv2.imwrite(os.path.join(self.tri_dir, '{0:04d}_drive.png'.format(i)), drive_frame)
+            else:
+                _ = self.model.sudo_forward(tar_img_masked)
+                break
 
             
 
@@ -162,7 +165,9 @@ def main():
         "--frame_limit", type=int, help="frame number limitation"
     )
     parser.add_argument(
-        "-t", dest="trace_output_path", type=str, default=None, help="Path for saving the TorchScript model."
+        "--export",
+        action="store_true",
+        help="Export to TorchScript model."
     )
     configargs = parser.parse_args()
 
@@ -173,7 +178,7 @@ def main():
     tgt_mask_fnames = vfc.tgt_mask_fnames
 
     tester = EncodeTester(configargs)
-    tester.test(tgt_fnames, tgt_mask_fnames)
+    tester.test(tgt_fnames, tgt_mask_fnames, export=configargs.export)
 
 if __name__ == "__main__":
     main()
