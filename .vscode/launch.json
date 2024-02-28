@@ -55,6 +55,32 @@
         },
 
         {
+            "name": "Export Server Model",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/src",
+            "console": "integratedTerminal", 
+            "program": "run_server_v2.py",
+            "args" : ["--config", "configs/stream.yml",
+                "--checkpoint", "../external/goha/s3/checkpoint825000.ckpt",
+                "--frame_limit", "90"
+            ],
+        },
+
+        {
+            "name": "Run ONNX Server Model",
+            "type": "python",
+            "request": "launch",
+            "cwd": "${workspaceFolder}/src",
+            "console": "integratedTerminal", 
+            "program": "run_server_v3.py",
+            "args" : ["--config", "configs/stream.yml",
+                "--checkpoint", "../external/goha/s3/checkpoint825000.ckpt",
+                "--frame_limit", "90", 
+            ],
+        },
+
+        {
 
             "name": "Run Client",
             "type": "python",

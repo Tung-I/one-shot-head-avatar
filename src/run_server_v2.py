@@ -112,7 +112,7 @@ class EncodeTester():
         print("===> Loaded checkpoint from {} at iteration {}.".format(checkpoint_path, self.iter_num))
         return
     
-    def test(self, tar_fnames, tar_mask_fnames, save_tri=True, trace_output_path=None):
+    def test(self, tar_fnames, tar_mask_fnames, save_tri=True):
         device = self.device
 
         for i in tqdm(range(self.frame_limit)):
@@ -122,12 +122,12 @@ class EncodeTester():
             tar_img_masked = tar_frame * tar_mask.reshape(1, tar_mask.shape[0], tar_mask.shape[1])
             tar_img_masked = torch.from_numpy(tar_img_masked[None, ...]).to(device).to(torch.float32) / 127.5 - 1
 
-            if trace_output_path:
-                # Export to TorchScript model
-                print('Exporting the model to TorchScript ...')
-                traced_model = torch.jit.trace(self.model, tar_img_masked)
-                torch.jit.save(traced_model, trace_output_path)
-                break
+            # if trace_output_path:
+            #     # Export to TorchScript model
+            #     print('Exporting the model to TorchScript ...')
+            #     traced_model = torch.jit.trace(self.model, tar_img_masked)
+            #     torch.jit.save(traced_model, trace_output_path)
+            #     break
 
             start = timer()
             with torch.no_grad():
@@ -166,10 +166,6 @@ def main():
     )
     configargs = parser.parse_args()
 
-    with open(configargs.config, "r") as f:
-        cfg_dict = yaml.load(f, Loader=yaml.FullLoader)
-        cfg = CfgNode(cfg_dict)
-
     os.makedirs(TRI_DIR, exist_ok=True)
 
     vfc = VideoFrameCollector(frame_limit=configargs.frame_limit)
@@ -177,7 +173,7 @@ def main():
     tgt_mask_fnames = vfc.tgt_mask_fnames
 
     tester = EncodeTester(configargs)
-    tester.test(tgt_fnames, tgt_mask_fnames, trace=configargs.trace_output_path)
+    tester.test(tgt_fnames, tgt_mask_fnames)
 
 if __name__ == "__main__":
     main()

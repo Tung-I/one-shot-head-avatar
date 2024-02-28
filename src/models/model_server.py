@@ -20,9 +20,15 @@ from models.networks import Embed2Plane
 from deep3d_modules.facerecon_model import FaceReconModel
 from deep3d_modules.render import MeshRenderer
 
-import torch.onnx
+import onnx
+import onnxruntime
 
 
+def preprocess(img):
+    return F.interpolate((img + 1) / 2.0, size = (224, 224), mode = 'bilinear', align_corners = False)
+
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if tensor.requires_grad else tensor.cpu().numpy()
 
 class ServerModel(torch.nn.Module):
     def __init__(self):
@@ -30,8 +36,8 @@ class ServerModel(torch.nn.Module):
         self.device = 'cuda:0'
 
         # Expression branch 
-        # self.expr_net = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512")
         self.expr_net = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512", torchscript=True)
+        # self.expr_net = SegformerForSemanticSegmentation.from_pretrained("nvidia/segformer-b0-finetuned-ade-512-512", torchscript=True)
         self.expr_net.segformer.encoder.patch_embeddings[0].proj = nn.Conv2d(3, 32, kernel_size=(7, 7), stride=(4, 4), padding=(3, 3))
         self.expr_net.decode_head.batch_norm = nn.Identity()
         self.expr_net.decode_head.activation = nn.Identity()
@@ -54,6 +60,7 @@ class ServerModel(torch.nn.Module):
         self.renderer = MeshRenderer(rasterize_fov=fov, znear=z_near, zfar=z_far, rasterize_size=int(2 * center))
         for param in self.deep3D.net_recon.parameters():
             param.requires_grad = False
+        self.renderer.eval()
 
         # Registered buffer: param that should be be saved and restored in the state_dict, but not trained by the optimizer
         cano_pose = torch.tensor([[ 0.9997,  0.0059,  0.0250, -0.0731,  0.0081, -0.9961, -0.0882,  0.2462,
@@ -100,25 +107,22 @@ class ServerModel(torch.nn.Module):
         }
         self.load_state_dict(_state_dict)
 
-        # Caching
-        cano_plane = np.load('cache/cano.npy')
-        app_plane = np.load('cache/app.npy')
-        cano_plane_cached = torch.tensor(cano_plane).to(self.device)
-        app_plane_cached = torch.tensor(app_plane).to(self.device)
+        # # Caching
+        # cano_plane = np.load('cache/cano.npy')
+        # app_plane = np.load('cache/app.npy')
+        # cano_plane_cached = torch.tensor(cano_plane).to(self.device)
+        # app_plane_cached = torch.tensor(app_plane).to(self.device)
         img_src = np.load('cache/img_src.npy')
         img_src = torch.from_numpy(img_src[None, ...]).to(self.device).to(torch.float32) / 127.5 - 1
-        self.register_buffer("cano_plane_cached", cano_plane_cached)
-        self.register_buffer("app_plane_cached", app_plane_cached)
+        # self.register_buffer("cano_plane_cached", cano_plane_cached)
+        # self.register_buffer("app_plane_cached", app_plane_cached)
         self.register_buffer("img_src", img_src)
-
-    def preprocess(self, img):
-            return F.interpolate((img + 1) / 2.0, size = (224, 224), mode = 'bilinear', align_corners = False)
     
     def forward(self, img_tar):
 
-        id_img = self.preprocess(self.img_src)
-        pose_img = self.preprocess(self.cano_exemplar)
-        tar_img = self.preprocess(img_tar)
+        id_img = preprocess(self.img_src)
+        pose_img = preprocess(self.cano_exemplar)
+        tar_img = preprocess(img_tar)
         img = torch.cat((id_img, pose_img, tar_img))
         with torch.no_grad():
             output_coeff = self.deep3D.net_recon(img)
@@ -128,33 +132,146 @@ class ServerModel(torch.nn.Module):
 
         with torch.no_grad():
             pred_vertex, pred_texture, pred_color, landmark = self.deep3D.facemodel.compute_for_render(output_coeff[0:1])
-            pred_mask, _, pred_face = self.renderer(pred_vertex, self.deep3D.facemodel.face_buf, feat=pred_color)
+            # pred_mask, _, pred_face = self.renderer(pred_vertex, self.deep3D.facemodel.face_buf, feat=pred_color)
+            pred_face = self.renderer(pred_vertex, self.deep3D.facemodel.face_buf, pred_color)
         
+
         sudo = pred_face * 2 - 1
         sudo = F.interpolate(sudo, size=self.img_src.shape[-2:], mode='bilinear', align_corners=False)
         sudo = ((sudo + 1) / 2.0 - self.image_mean.detach()) / self.image_std.detach()
         # return sudo
         
-        # inputs = {}
-        # inputs['pixel_values'] = sudo
-        # inputs['output_hidden_states'] = True
-        # expr_feat = self.expr_net(**inputs).logits
-
-        expr_feat = self.expr_net(pixel_values=sudo, output_hidden_states=True, return_dict=True).logits
+        inputs = {}
+        inputs['pixel_values'] = sudo
+        inputs['output_hidden_states'] = True
+        expr_feat = self.expr_net(**inputs).logits
         expr_planes = self.embedding2expr(expr_feat)
 
-        return self.cano_plane_cached + expr_planes + self.app_plane_cached
+        return expr_planes
+
+        # expr_feat = self.expr_net(pixel_values=sudo, output_hidden_states=True, return_dict=True).logits
+        # expr_planes = self.embedding2expr(expr_feat)
+
+        # tri_planes = self.cano_plane_cached + expr_planes + self.app_plane_cached
+        # return tri_planes
 
         
-        
-    
-    # def sudo_forward(self, data):
-    #     img_tar = data['img_target']
-    #     img_src = data['img_src']
+    def sudo_forward(self, img_tar):
 
-    #     sudo = self.get_sudo(img_src, self.cano_exemplar, img_tar)
-    #     sudo = F.interpolate(sudo, size=img_src.shape[-2:], mode='bilinear', align_corners=False)
-    #     return sudo
+        print('Run and verify deep3D')
+        id_img = preprocess(self.img_src)
+        pose_img = preprocess(self.cano_exemplar)
+        tar_img = preprocess(img_tar)
+        img = torch.cat((id_img, pose_img, tar_img))
+        with torch.no_grad():
+            output_coeff = self.deep3D.net_recon(img)
+
+        # Export self.deep3D.net_recon to ONNX
+        torch.onnx.export(self.deep3D.net_recon,               # model being run
+                  img,                         # model input (or a tuple for multiple inputs)
+                  "export/net_recon.onnx",   # where to save the model (can be a file or file-like object)
+                  export_params=True,        # store the trained parameter weights inside the model file
+                  opset_version=10,          # the ONNX version to export the model to
+                  do_constant_folding=True,  # whether to execute constant folding for optimization
+                  input_names = ['input'],   # the model's input names
+                  output_names = ['output'] # the model's output names
+                  )
+        # Verify the ONNX model
+        x = img
+        torch_out = output_coeff
+        ort_model = onnx.load("export/net_recon.onnx")
+        onnx.checker.check_model(ort_model)
+        ort_session = onnxruntime.InferenceSession("export/net_recon.onnx", providers=['CUDAExecutionProvider'])
+        ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(x)}
+        ort_outs = ort_session.run(None, ort_inputs)
+        np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
+
+
+        print('Run and verify mesh renderer')
+        output_coeff[0, 80: 144] = output_coeff[2, 80:144]  # replace expression with target expression
+        output_coeff[0, 224: 227] = output_coeff[1, 224: 227]  # replace head pose with target head pose
+        output_coeff[0, 254:] = output_coeff[1, 254:]
+        # Make (pred_vertex, self.deep3D.facemodel.face_buf, pred_color) a dict
+        
+        with torch.no_grad():
+            pred_vertex, pred_texture, pred_color, landmark = self.deep3D.facemodel.compute_for_render(output_coeff[0:1])
+            # pred_face = self.renderer(pred_vertex, self.deep3D.facemodel.face_buf, pred_color)
+            pred_face = self.renderer(pred_vertex, self.deep3D.facemodel.face_buf, pred_color)
+
+        # # Export self.renderer to ONNX
+        # torch.onnx.export(self.renderer,               # model being run
+        #             (pred_vertex, self.deep3D.facemodel.face_buf, pred_color),                         # model input (or a tuple for multiple inputs)
+        #             "export/mesh_renderer.onnx",   # where to save the model (can be a file or file-like object)
+        #             export_params=True,        # store the trained parameter weights inside the model file
+        #             opset_version=11,          # the ONNX version to export the model to
+        #             do_constant_folding=True,  # whether to execute constant folding for optimization
+        #             input_names = ['input'],   # the model's input names
+        #             output_names = ['output'] # the model's output names
+        #             )
+        # # Verify the ONNX model
+        # x = (pred_vertex, self.deep3D.facemodel.face_buf, pred_color)
+        # torch_out = pred_face
+        # ort_model = onnx.load("export/mesh_renderer.onnx")
+        # onnx.checker.check_model(ort_model)
+        # ort_session = onnxruntime.InferenceSession("export/mesh_renderer.onnx", providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+        # ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(x)}
+        # ort_outs = ort_session.run(None, ort_inputs)
+        # np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
+        
+        print('Run and verify expr_net')
+        sudo = pred_face * 2 - 1
+        sudo = F.interpolate(sudo, size=self.img_src.shape[-2:], mode='bilinear', align_corners=False)
+        sudo = ((sudo + 1) / 2.0 - self.image_mean.detach()) / self.image_std.detach()
+        expr_feat = self.expr_net(pixel_values=sudo, output_hidden_states=True, return_dict=True).logits
+        
+        # traced_model = torch.jit.trace(self.expr_net, sudo)
+        # torch.jit.save(traced_model, "expr_net.pt")
+        
+        torch.onnx.export(self.expr_net,               # model being run
+                    sudo,                         # model input (or a tuple for multiple inputs)
+                    "export/expr_net.onnx",   # where to save the model (can be a file or file-like object)
+                    export_params=True,        # store the trained parameter weights inside the model file
+                    opset_version=11,          # the ONNX version to export the model to
+                    do_constant_folding=True,  # whether to execute constant folding for optimization
+                    input_names = ['input'],   # the model's input names
+                    output_names = ['output'] # the model's output names
+                    )
+        x = sudo
+        torch_out = expr_feat
+        ort_model = onnx.load("export/expr_net.onnx")
+        onnx.checker.check_model(ort_model)
+        ort_session = onnxruntime.InferenceSession("export/expr_net.onnx", providers=['CUDAExecutionProvider'])
+        ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(x)}
+        ort_outs = ort_session.run(None, ort_inputs)
+        np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
+           
+
+
+        print('Run and verify embedding2expr')
+        expr_planes = self.embedding2expr(expr_feat)
+        torch.onnx.export(self.embedding2expr,               # model being run
+                    expr_feat,                         # model input (or a tuple for multiple inputs)
+                    "export/embedding2expr.onnx",   # where to save the model (can be a file or file-like object)
+                    export_params=True,        # store the trained parameter weights inside the model file
+                    opset_version=11,          # the ONNX version to export the model to
+                    do_constant_folding=True,  # whether to execute constant folding for optimization
+                    input_names = ['input'],   # the model's input names
+                    output_names = ['output'] # the model's output names
+                    )
+        # Verify the ONNX model
+        x = expr_feat
+        torch_out = expr_planes
+        ort_model = onnx.load("export/embedding2expr.onnx")
+        onnx.checker.check_model(ort_model)
+        ort_session = onnxruntime.InferenceSession("export/embedding2expr.onnx", providers=['CUDAExecutionProvider'])
+        ort_inputs = {ort_session.get_inputs()[0].name: to_numpy(x)}
+        ort_outs = ort_session.run(None, ort_inputs)
+        # np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
+
+ 
+        
+
+        return expr_planes
 
     # def get_sudo(self, id_img, pose_img, tar_img, exp_transfer=True):
     #     """
